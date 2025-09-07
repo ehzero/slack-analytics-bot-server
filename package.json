@@ -1,0 +1,23 @@
+{
+  "name": "slack-analytics-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "build": "echo Use 'sam build' for Lambda bundling via esbuild",
+    "lint": "echo (optional) add eslint later",
+    "start": "sam local start-api"
+  },
+  "dependencies": {
+    "@slack/web-api": "^7.3.1",
+    "esbuild": "^0.21.5",
+    "mysql2": "^3.11.0",
+    "openai": "^4.55.3",
+    "string-width": "^7.2.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.131",
+    "@types/node": "^20.14.12",
+    "typescript": "^5.5.4"
+  }
+}

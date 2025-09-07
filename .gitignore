@@ -1,0 +1,43 @@
+# Node
+node_modules/
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# TypeScript build output
+dist/
+build/
+
+# AWS SAM build artifacts
+.aws-sam/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+*.env
+sam-env.json
+samconfig.toml
+
+# OS / Editor
+.DS_Store
+.vscode/
+.idea/
+
+# Testing / Coverage
+coverage/
+.nyc_output/
+
+# Caches / Temp
+.eslintcache
+.parcel-cache/
+tmp/
+temp/
+.tmp/
+
+# Archives
+*.zip
+

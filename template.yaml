@@ -1,0 +1,147 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Slack Analytics Bot - SAM Template (TypeScript / Node.js)
+
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Timeout: 120
+    MemorySize: 1024
+    Tracing: Active
+    Environment:
+      Variables:
+        LOG_LEVEL: !Ref LogLevel
+        SLACK_BOT_TOKEN: !Ref SlackBotToken
+        SLACK_SIGNING_SECRET: !Ref SlackSigningSecret
+        OPENAI_API_KEY: !Ref OpenAIKey
+        OPENAI_MODEL: !Ref OpenAIModel
+        REPORT_CHANNEL_ID: !Ref ReportChannelId
+        OPENAI_QA_SYSTEM_PROMPT: !Ref OpenAIQASystemPrompt
+        OPENAI_REPORT_SYSTEM_PROMPT: !Ref OpenAIReportSystemPrompt
+        DB_HOST: !Ref DbHost
+        DB_PORT: !Ref DbPort
+        DB_USER: !Ref DbUser
+        DB_PASSWORD: !Ref DbPassword
+        DB_NAME: !Ref DbName
+
+Parameters:
+  SlackBotToken:
+    Type: String
+    NoEcho: true
+    Description: Slack Bot User OAuth Token (starts with xoxb-)
+  SlackSigningSecret:
+    Type: String
+    NoEcho: true
+    Description: Slack App Signing Secret
+  ReportChannelId:
+    Type: String
+    Default: ""
+    Description: Slack channel ID to post scheduled reports
+  DbHost:
+    Type: String
+    Default: ""
+    Description: MySQL hostname
+  DbPort:
+    Type: String
+    Default: "3306"
+    Description: MySQL port
+  DbUser:
+    Type: String
+    Default: ""
+    Description: MySQL username
+  DbPassword:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: MySQL password
+  DbName:
+    Type: String
+    Default: ""
+    Description: MySQL database name
+  OpenAIKey:
+    Type: String
+    NoEcho: true
+    Description: OpenAI API Key
+  OpenAIModel:
+    Type: String
+    Default: gpt-5-nano
+    Description: OpenAI Chat Model (e.g. gpt-5-nano)
+  OpenAIQASystemPrompt:
+    Type: String
+    Default: |
+      당신은 MySQL 전문가입니다. \n사용자가 자연어로 요청하면, 안전하고 유효한 SQL문만 작성하십시오.\n\n[DB 스키마]\n- user_action(user_action_idx, user_action_type, ceo_idx, extra_data, ins_date)\n- ceo(ceo_idx, corp_idx)\n- tbl_corp(corp_idx, corp_name)\n\n[조건]\n1. user_action.ceo_idx → corp_name으로 변환하여 출력 (tc.corp_name 컬럼 포함)\n2. 불필요한 컬럼 제외\n3. SELECT 구문만 작성, MySQL에서 실행 가능해야 함\n4. 답변은 SQL문만 반환 (설명, 주석, 코드 블록 금지)\n\n[이벤트 그룹]\n- 핵심: print_pop, save_pamphlet, send_message (비교/비율 분석용)\n- 참고: visit, save_pop (필요 시 단순 카운트)\n\n[출력 예시]\nSELECT ua.user_action_idx,\n       ua.user_action_type,\n       ua.extra_data,\n       ua.ins_date,\n       tc.corp_name\nFROM user_action ua\nJOIN ceo c ON ua.ceo_idx = c.ceo_idx\nJOIN tbl_corp tc ON c.corp_idx = tc.corp_idx\nWHERE ... ;
+    Description: System prompt used for mention Q&A
+  OpenAIReportSystemPrompt:
+    Type: String
+    Default: |
+      당신은 전문 데이터 분석가입니다. 주어진 JSON 사용자 로그 데이터를 기반으로\n사실에 근거한 체계적이고 가독성이 높은 데이터 분석 보고서를 작성하십시오.\n\n[분석 목적]\n- 서비스 내 사용자 행동 패턴과 트렌드 이해\n- 핵심 기능 사용 현황 파악 (모바일 전단 제작, POP 제작, 메시지 전송)\n- 주요 이벤트별 통계 분석 (print_pop, save_pamphlet, send_message)\n- 주간·월간·요일별 비교를 통한 패턴, 트렌드, 이상치 확인\n\n[보고서 작성 지침]\n1. 핵심 요약\n    - 분석 대상 기간을 명확히 표기 (YYYY-MM-DD ~ YYYY-MM-DD)\n    - 주간 비교를 고정된 포맷으로 요약\n        예) print_pop: 7월 3,881건 → 8월 3,318건 (-14.5%)\n            send_message: 8월 3주차 137건 → 8월 4주차 153건 (+11.7%)\n    - 월간 비교를 고정된 포맷으로 요약\n        예) print_pop: 8월 3주차 137건 → 8월 4주차 153건 (+11.7%)\n        \n    - 요일별 이벤트 비교를 월~일 순으로 고정 포맷으로 요약, 비율은 각 이벤트의 총 개수 기준 특정 요일에 얼마나 발생했는지 계산\n        예) 월요일: save_pamphlet 100건 (10%) ⎮ print_pop 100건 (10%) ⎮ send_message 100건 (10%)\n    - 전체 데이터의 핵심 트렌드·이상치를 간단히 요약\n\n2. 행동별 분석\n    - 이벤트 종류별 분석\n    - 상위 이벤트 및 낮은 이벤트 식별\n\n3. 마트별 분석\n    - 마트별 활동량 비교\n    - 상위 마트와 특이 이벤트\n    - 마트별 이벤트 비율 분석\n\n4. 시간/트렌드 분석\n    - 주간·월간·요일별 비교를 통해 패턴/트렌드/이상치 설명\n    - 이벤트별 증가·감소 추세 분석\n\n5. 상품 카테고리 분석\n    - POP_템플릿_카테고리_통계 (최근 30일 기준)\n    - 이벤트 수와 비중 분석\n\n6. 인사이트\n    - 데이터 기반 개선점 및 주목할 패턴 제시\n\n[출력 형식]\n- 표 또는 리스트를 적극 활용\n- 들여쓰기는 공백 4칸 사용\n- 전문적이면서도 이해하기 쉽게 작성\n- \"코프/코퍼레이션/기업/상점\" 등은 모두 \"마트\"로 통일\n- 코드 작성, 추가 분석 제안, 데이터 수집 확장, 시각화 심화 제안은 제외
+    Description: System prompt used for report generation
+  LogLevel:
+    Type: String
+    Default: INFO
+    AllowedValues: [CRITICAL, ERROR, WARNING, INFO, DEBUG]
+    Description: Log level for functions
+  ScheduleExpression:
+    Type: String
+    Default: cron(0 23 ? * SUN *)
+    Description: >-
+      EventBridge schedule for weekly report. Default is 23:00 UTC Sunday
+      (08:00 Monday KST).
+
+Resources:
+  ApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      TracingEnabled: true
+
+  MentionQnAFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: handlers/answerMention.handleSlackMentionQnA
+      Events:
+        SlackEvents:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /slack/events
+            Method: POST
+      ReservedConcurrentExecutions: 1
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "node20"
+        Sourcemap: true
+        EntryPoints:
+          - src/handlers/answerMention.ts
+        External:
+          - aws-sdk
+
+  GenerateReportFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: handlers/generateReport.generateAnalyticsReport
+      Events:
+        WeeklySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: !Ref ScheduleExpression
+      ReservedConcurrentExecutions: 1
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "node20"
+        Sourcemap: true
+        EntryPoints:
+          - src/handlers/generateReport.ts
+        External:
+          - aws-sdk
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL for Slack events
+    Value: !Sub https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod/slack/events
