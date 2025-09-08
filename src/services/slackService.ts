@@ -8,10 +8,15 @@ export class SlackService {
   }
 
   // 채널에 새 메시지 전송
-  async postMessage(params: { channel: string; text: string }): Promise<void> {
+  async postMessage(params: {
+    channel: string;
+    text: string;
+    blocks?: any[];
+  }): Promise<void> {
     await this.client.chat.postMessage({
       channel: params.channel,
       text: params.text,
+      blocks: params.blocks,
     });
   }
 

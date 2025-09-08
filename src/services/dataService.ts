@@ -18,16 +18,24 @@ const connection = mysql.createPool({
 export function isSafeSelectQuery(sql: string): boolean {
   const trimmed = sql.trim();
   const withoutTrailingSemis = trimmed.replace(/;+\s*$/, "");
-  if (!/^SELECT\s/i.test(withoutTrailingSemis)) return false;
-  if (
-    /(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|REPLACE|GRANT|REVOKE|ATTACH|DETACH|MERGE)\b/i.test(
-      withoutTrailingSemis
-    )
-  )
-    return false;
+
+  // 1. SELECT 또는 CTE(With)로 시작해야 함
+  if (!/^(SELECT|WITH)\s/i.test(withoutTrailingSemis)) return false;
+
+  // 2. 위험 키워드 금지
+  const forbiddenKeywords =
+    /(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|REPLACE|GRANT|REVOKE|ATTACH|DETACH|MERGE)\b/i;
+  if (forbiddenKeywords.test(withoutTrailingSemis)) return false;
+
+  // 3. INTO OUTFILE / DUMPFILE 금지
   if (/(INTO\s+OUTFILE|INTO\s+DUMPFILE)\b/i.test(withoutTrailingSemis))
     return false;
-  if (withoutTrailingSemis.includes(";")) return false; // 중간 세미콜론 금지 (다중문 방지)
+
+  // 4. 중간 세미콜론 금지 (다중문 방지)
+  // 마지막 세미콜론만 제거했기 때문에, 내부에 존재하면 false
+  const withoutAllSemis = withoutTrailingSemis.replace(/;+/g, "");
+  if (withoutAllSemis.includes(";")) return false;
+
   return true;
 }
 
@@ -41,6 +49,7 @@ export function ensureLimit(sql: string, defaultLimit = 100): string {
 
 // 안전한 SELECT 쿼리 실행 유틸
 export async function executeSafeSelect(rawSql: string, defaultLimit = 100) {
+  console.log(rawSql);
   if (!isSafeSelectQuery(rawSql)) {
     throw new Error("Unsafe SQL: Only single SELECT queries are allowed.");
   }

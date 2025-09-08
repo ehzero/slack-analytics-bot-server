@@ -1,64 +1,86 @@
 // 주간 보고서용 SQL: JSON 객체 반환
-export const WEEKLY_ANALYTICS_SQL = `
+export const WEEKLY_ANALYTICS_SQL = `WITH RECURSIVE
+-- 최근 5주
+weeks AS (
+    SELECT 0 AS offset
+    UNION ALL
+    SELECT offset + 1
+    FROM weeks
+    WHERE offset < 4
+),
+week_list AS (
+    SELECT 
+        YEAR(DATE_SUB(CURDATE(), INTERVAL offset WEEK)) AS year_num,
+        WEEK(DATE_SUB(CURDATE(), INTERVAL offset WEEK),1) AS week_num,
+        DATE_FORMAT(DATE_SUB(DATE_SUB(CURDATE(), INTERVAL offset WEEK), INTERVAL WEEKDAY(DATE_SUB(CURDATE(), INTERVAL offset WEEK)) DAY), '%m-%d') AS week_start,
+        DATE_FORMAT(DATE_ADD(DATE_SUB(DATE_SUB(CURDATE(), INTERVAL offset WEEK), INTERVAL WEEKDAY(DATE_SUB(CURDATE(), INTERVAL offset WEEK)) DAY), INTERVAL 6 DAY), '%m-%d') AS week_end
+    FROM weeks
+),
+-- 최근 6개월
+months AS (
+    SELECT 0 AS offset
+    UNION ALL
+    SELECT offset + 1
+    FROM months
+    WHERE offset < 5
+),
+month_list AS (
+    SELECT 
+        DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL offset MONTH), '%Y년 %m월') AS month_label,
+        DATE_FORMAT(DATE_SUB(DATE_SUB(CURDATE(), INTERVAL offset MONTH), INTERVAL DAY(DATE_SUB(CURDATE(), INTERVAL offset MONTH))-1 DAY), '%m-%d') AS month_start,
+        DATE_FORMAT(LAST_DAY(DATE_SUB(CURDATE(), INTERVAL offset MONTH)), '%m-%d') AS month_end
+    FROM months
+)
 SELECT JSON_OBJECT(
-    -- case1: 주 단위 비교 (지난주 vs 지지난주)
-    '주간_비교',
-	(
-	    SELECT JSON_ARRAYAGG(
-	        JSON_OBJECT(
-	            'week_label', CONCAT(year, '년 ', month, '월 ', week_num, '주차'),
-	            'save_pamphlet', save_pamphlet_count,
-	            'send_message', send_message_count,
-	            'print_pop', print_pop_count
-	        )
-	    )
-	    FROM (
-	        SELECT 
-	            YEAR(ins_date) AS year,
-	            MONTH(ins_date) AS month,
-	            FLOOR((DAY(ins_date)-1)/7)+1 AS week_num,
-	            SUM(CASE WHEN user_action_type='save_pamphlet' THEN 1 ELSE 0 END) AS save_pamphlet_count,
-	            SUM(CASE WHEN user_action_type='send_message' THEN 1 ELSE 0 END) AS send_message_count,
-	            SUM(CASE WHEN user_action_type='print_pop' THEN 1 ELSE 0 END) AS print_pop_count
-	        FROM martjangbogo.user_action
-	        WHERE YEAR(ins_date) = YEAR(CURDATE())
-	          AND WEEK(ins_date, 1) IN (WEEK(CURDATE(), 1)-1, WEEK(CURDATE(), 1)-2)
-	          AND user_action_type IN ('save_pamphlet', 'send_message', 'print_pop')
-	        GROUP BY YEAR(ins_date), WEEK(ins_date, 1)
-	        ORDER BY YEAR(ins_date) DESC, WEEK(ins_date, 1) DESC
-	    ) t
-	),
-
-    -- case2: 월 단위 비교 (지난달 vs 지지난달)
-    '월간_비교',
-    (
+    -- 1. 주간 로그 통계
+    '주간_로그_통계', (
         SELECT JSON_ARRAYAGG(JSON_OBJECT(
-            'year', year,
-            'month', month,
-            'save_pamphlet', save_pamphlet_count,
-            'send_message', send_message_count,
-            'print_pop', print_pop_count
+            '주', CONCAT(w.year_num,'년 ', w.week_num,'주차 (', w.week_start,'~', w.week_end,')'),
+            'save_pamphlet', IFNULL(t.save_pamphlet_count,0),
+            'send_message', IFNULL(t.send_message_count,0),
+            'print_pop', IFNULL(t.print_pop_count,0)
         ))
-        FROM (
-            SELECT YEAR(ins_date) AS year,
-                   MONTH(ins_date) AS month,
-                   SUM(CASE WHEN user_action_type='save_pamphlet' THEN 1 ELSE 0 END) AS save_pamphlet_count,
-                   SUM(CASE WHEN user_action_type='send_message' THEN 1 ELSE 0 END) AS send_message_count,
-                   SUM(CASE WHEN user_action_type='print_pop' THEN 1 ELSE 0 END) AS print_pop_count
+        FROM week_list w
+        LEFT JOIN (
+            SELECT 
+                YEAR(ins_date) AS year_num,
+                WEEK(ins_date,1) AS week_num,
+                SUM(CASE WHEN user_action_type='save_pamphlet' THEN 1 ELSE 0 END) AS save_pamphlet_count,
+                SUM(CASE WHEN user_action_type='send_message' THEN 1 ELSE 0 END) AS send_message_count,
+                SUM(CASE WHEN user_action_type='print_pop' THEN 1 ELSE 0 END) AS print_pop_count
             FROM martjangbogo.user_action
-            WHERE (
-                   (YEAR(ins_date) = YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)) AND MONTH(ins_date) = MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)))
-                OR (YEAR(ins_date) = YEAR(DATE_SUB(CURDATE(), INTERVAL 2 MONTH)) AND MONTH(ins_date) = MONTH(DATE_SUB(CURDATE(), INTERVAL 2 MONTH)))
-            )
-            AND user_action_type IN ('save_pamphlet','send_message','print_pop')
-            GROUP BY year, month
-            ORDER BY year DESC, month DESC
-        ) t
+            WHERE ins_date >= DATE_SUB(CURDATE(), INTERVAL 35 DAY)
+              AND user_action_type IN ('save_pamphlet','send_message','print_pop')
+            GROUP BY YEAR(ins_date), WEEK(ins_date,1)
+        ) t ON w.year_num = t.year_num AND w.week_num = t.week_num
+        ORDER BY w.year_num DESC, w.week_num DESC
     ),
 
-    -- case3: 요일별 비교 (최근 30일 기준)
-    '요일별_비교_최근30일',
-    (
+    -- 2. 월간 로그 통계 (최근 6개월)
+    '월간_로그_통계', (
+        SELECT JSON_ARRAYAGG(JSON_OBJECT(
+            '월', CONCAT(m.month_label,' (', m.month_start,'~', m.month_end,')'),
+            'save_pamphlet', IFNULL(t.save_pamphlet_count,0),
+            'send_message', IFNULL(t.send_message_count,0),
+            'print_pop', IFNULL(t.print_pop_count,0)
+        ))
+        FROM month_list m
+        LEFT JOIN (
+            SELECT 
+                DATE_FORMAT(ins_date,'%Y년 %m월') AS month_label,
+                SUM(CASE WHEN user_action_type='save_pamphlet' THEN 1 ELSE 0 END) AS save_pamphlet_count,
+                SUM(CASE WHEN user_action_type='send_message' THEN 1 ELSE 0 END) AS send_message_count,
+                SUM(CASE WHEN user_action_type='print_pop' THEN 1 ELSE 0 END) AS print_pop_count
+            FROM martjangbogo.user_action
+            WHERE ins_date >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
+              AND user_action_type IN ('save_pamphlet','send_message','print_pop')
+            GROUP BY month_label
+        ) t ON m.month_label = t.month_label
+        ORDER BY m.month_label DESC
+    ),
+
+    -- 3. 요일별 로그 통계
+    '요일별_로그_통계', (
         SELECT JSON_ARRAYAGG(JSON_OBJECT(
             'weekday', weekday_name,
             'save_pamphlet', save_pamphlet_count,
@@ -87,9 +109,8 @@ SELECT JSON_OBJECT(
         ) t
     ),
 
-	 -- case4: 마트별 이벤트 통계 (total 기준 내림차순 정렬)
-    '마트별_이벤트통계_최근30일',
-    (
+    -- 4. 마트별 로그 통계
+    '마트별_로그_통계', (
         SELECT JSON_ARRAYAGG(JSON_OBJECT(
             'corp_name', corp_name,
             'save_pamphlet', save_pamphlet_count,
@@ -103,34 +124,79 @@ SELECT JSON_OBJECT(
                 SUM(CASE WHEN ua.user_action_type='save_pamphlet' THEN 1 ELSE 0 END) AS save_pamphlet_count,
                 SUM(CASE WHEN ua.user_action_type='send_message' THEN 1 ELSE 0 END) AS send_message_count,
                 SUM(CASE WHEN ua.user_action_type='print_pop' THEN 1 ELSE 0 END) AS print_pop_count,
-                SUM(CASE WHEN ua.user_action_type IN ('save_pamphlet', 'send_message', 'print_pop') THEN 1 ELSE 0 END) AS total
+                SUM(CASE WHEN ua.user_action_type IN ('save_pamphlet','send_message','print_pop') THEN 1 ELSE 0 END) AS total
             FROM martjangbogo.user_action ua
             JOIN martjangbogo.ceo c ON c.ceo_idx = ua.ceo_idx
             JOIN martjangbogo.tbl_corp corp ON corp.corp_idx = c.corp_idx
             WHERE ua.ins_date >= NOW() - INTERVAL 30 DAY
-              AND ua.user_action_type IN ('save_pamphlet', 'send_message', 'print_pop')
+              AND ua.user_action_type IN ('save_pamphlet','send_message','print_pop')
             GROUP BY corp.corp_idx, corp.corp_name
             ORDER BY total DESC
         ) t
     ),
 
-    -- case5: POP 템플릿 카테고리 통계
-    'POP_템플릿_카테고리_통계_최근30일',
-    (
-        SELECT JSON_ARRAYAGG(
-            JSON_OBJECT(
-                'category', category,
-                'count', cnt
-            )
-        )
-        FROM (
-            SELECT JSON_UNQUOTE(JSON_EXTRACT(extra_data,'$.category')) AS category,
-                   COUNT(*) AS cnt
-            FROM martjangbogo.user_action
-            WHERE ins_date >= NOW() - INTERVAL 30 DAY
-              AND user_action_type='print_pop'
-              AND JSON_EXTRACT(extra_data,'$.category') IS NOT NULL
-            GROUP BY category
-        ) AS t
+    -- 5. 현재 활성 마트
+    '현재_활성_마트', (
+        SELECT JSON_ARRAYAGG(JSON_OBJECT(
+            'corp_idx', c.corp_idx,
+            'corp_name', t.corp_name,
+            'approval_date', DATE_FORMAT(c.approval_date,'%Y-%m-%d'),
+            'exp_date', DATE_FORMAT(c.exp_date,'%Y-%m-%d')
+        ))
+        FROM martjangbogo.ceo c
+        LEFT JOIN martjangbogo.tbl_corp t ON c.corp_idx = t.corp_idx
+        WHERE c.approval_date IS NOT NULL
+          AND c.exp_date >= CURDATE()
+          AND c.corp_idx NOT IN (104133,96073,103959,72500)
+    ),
+
+    -- 6. 주간 신규/만료 마트
+    '주간_신규만료_마트', (
+        SELECT JSON_ARRAYAGG(JSON_OBJECT(
+            '주', CONCAT(w.year_num,'년 ', w.week_num,'주차 (', w.week_start,'~', w.week_end,')'),
+            '신규_마트', IFNULL(t.new_count,0),
+            '만료_마트', IFNULL(t.expired_count,0)
+        ))
+        FROM week_list w
+        LEFT JOIN (
+            SELECT 
+                YEAR(approval_date) AS year_num,
+                WEEK(approval_date,1) AS week_num,
+                COUNT(DISTINCT corp_idx) AS new_count,
+                COUNT(DISTINCT CASE 
+                    WHEN exp_date BETWEEN DATE_SUB(CURDATE(), INTERVAL 35 DAY) AND CURDATE()
+                    THEN corp_idx 
+                END) AS expired_count
+            FROM martjangbogo.ceo
+            WHERE approval_date IS NOT NULL
+              AND corp_idx NOT IN (104133,96073,103959,72500)
+            GROUP BY YEAR(approval_date), WEEK(approval_date,1)
+        ) t ON w.year_num = t.year_num AND w.week_num = t.week_num
+        ORDER BY w.year_num DESC, w.week_num DESC
+    ),
+
+    -- 7. 월간 신규/만료 마트 (최근 6개월)
+    '월간_신규만료_마트', (
+        SELECT JSON_ARRAYAGG(JSON_OBJECT(
+            '월', CONCAT(m.month_label,' (', m.month_start,'~', m.month_end,')'),
+            '신규_마트', IFNULL(t.new_count,0),
+            '만료_마트', IFNULL(t.expired_count,0)
+        ))
+        FROM month_list m
+        LEFT JOIN (
+            SELECT 
+                DATE_FORMAT(approval_date,'%Y년 %m월') AS month_label,
+                COUNT(DISTINCT corp_idx) AS new_count,
+                COUNT(DISTINCT CASE 
+                    WHEN exp_date BETWEEN DATE_SUB(LAST_DAY(DATE_SUB(CURDATE(), INTERVAL 6 MONTH)), INTERVAL DAY(LAST_DAY(DATE_SUB(CURDATE(), INTERVAL 6 MONTH)))-1 DAY)
+                                        AND LAST_DAY(DATE_SUB(CURDATE(), INTERVAL 1 MONTH))
+                    THEN corp_idx 
+                END) AS expired_count
+            FROM martjangbogo.ceo
+            WHERE approval_date IS NOT NULL
+              AND corp_idx NOT IN (104133,96073,103959,72500)
+            GROUP BY month_label
+        ) t ON m.month_label = t.month_label
+        ORDER BY m.month_label DESC
     )
 ) AS final_json;`;

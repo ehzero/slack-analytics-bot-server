@@ -1,6 +1,7 @@
 import { OpenAIService } from "../services/openaiService";
 import { SlackService } from "../services/slackService";
 import { fetchSummaryJsonFromDb } from "../services/dataService";
+import json from "../../test.json";
 
 // 데이터 분석 보고서를 생성하고 채널에 게시하는 핸들러
 export async function generateAnalyticsReport() {
@@ -19,13 +20,15 @@ export async function generateAnalyticsReport() {
   const channel = process.env.REPORT_CHANNEL_ID || "";
 
   try {
-    const reportText = await openai.summarizeJsonReport({
+    const report = await openai.summarizeJsonReport({
       dataJson,
       systemPrompt,
     });
 
+    const blocks = JSON.parse(report) as any[];
+
     // Slack 채널로 보고서 전송
-    await slack.postMessage({ channel, text: reportText });
+    await slack.postMessage({ channel, text: "", blocks });
   } catch (e: any) {
     await slack.postMessage({
       channel,

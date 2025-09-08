@@ -232,7 +232,7 @@ export async function handleSlackMentionQnA(
         const sqlFence = String.fromCharCode(96).repeat(3);
         const tableBlock = formatRowsAsTable(rows, 100);
         const headMessage = truncateForSlack(
-          `SQL 실행 결과\n\n${sqlFence}sql\n${executedSql}\n${sqlFence}\n${header}`
+          `SQL 실행 결과\n\n${sqlFence}${executedSql}\n${sqlFence}\n${header}`
         );
         await slack.replyInThread({
           channel: channelId,
