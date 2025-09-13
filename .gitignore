@@ -36,3 +36,5 @@ temp/
 # Archives
 *.zip
 
+# Claude
+.claude/
