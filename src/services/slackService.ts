@@ -1,4 +1,6 @@
 import { WebClient } from "@slack/web-api";
+import * as fs from "fs";
+import * as path from "path";
 
 export class SlackService {
   private client: WebClient;
@@ -31,5 +33,46 @@ export class SlackService {
       text: params.text,
       thread_ts: params.thread_ts,
     });
+  }
+
+  // JSON 데이터를 파일로 업로드
+  async uploadJson(params: {
+    channel: string;
+    jsonData: any;
+    title?: string;
+    initial_comment?: string;
+    thread_ts?: string;
+  }): Promise<void> {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const filename = `data-${timestamp}.json`;
+    const tempFilePath = path.join(process.cwd(), "temp", filename);
+
+    // temp 디렉토리가 없으면 생성
+    const tempDir = path.dirname(tempFilePath);
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+
+    // JSON 파일로 저장
+    fs.writeFileSync(
+      tempFilePath,
+      JSON.stringify(params.jsonData, null, 2),
+      "utf-8"
+    );
+
+    // Slack에 파일 업로드
+    const uploadParams: any = {
+      channel_id: params.channel,
+      file: fs.createReadStream(tempFilePath),
+      filename,
+      title: params.title || filename,
+      initial_comment: params.initial_comment,
+    };
+    
+    if (params.thread_ts) {
+      uploadParams.thread_ts = params.thread_ts;
+    }
+    
+    await this.client.files.uploadV2(uploadParams);
   }
 }

@@ -2,6 +2,15 @@ import mysql from "mysql2/promise";
 import type { RowDataPacket } from "mysql2/promise";
 import { WEEKLY_ANALYTICS_SQL } from "../constants/sql";
 
+// 디버깅을 위한 연결 정보 로그 (비밀번호는 마스킹)
+console.log("DB Connection Config:", {
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  database: process.env.DB_NAME,
+  port: process.env.DB_PORT,
+  password: process.env.DB_PASSWORD ? "***" : "NOT_SET",
+});
+
 const connection = mysql.createPool({
   host: process.env.DB_HOST || "",
   user: process.env.DB_USER || "",
@@ -49,21 +58,24 @@ export function ensureLimit(sql: string, defaultLimit = 100): string {
 
 // 안전한 SELECT 쿼리 실행 유틸
 export async function executeSafeSelect(rawSql: string, defaultLimit = 100) {
-  console.log(rawSql);
   if (!isSafeSelectQuery(rawSql)) {
     throw new Error("Unsafe SQL: Only single SELECT queries are allowed.");
   }
 
   const sqlToRun = ensureLimit(rawSql, defaultLimit);
   const [rows] = await connection.query<RowDataPacket[]>(sqlToRun);
-  return { rows, executedSql: sqlToRun };
+  let jsonData = rows?.[0]?.result;
+  if (typeof jsonData === "string") jsonData = JSON.parse(jsonData);
+  if (jsonData && typeof jsonData === "object")
+    return { jsonData, executedSql: sqlToRun };
+  throw new Error("Empty result from SQL");
 }
 
 // 분석용 데이터 조회
 export async function fetchSummaryJsonFromDb() {
   const [rows] = await connection.query<any[]>(WEEKLY_ANALYTICS_SQL);
-  const value = rows?.[0]?.final_json;
-  if (typeof value === "string") return JSON.parse(value);
-  if (value && typeof value === "object") return value;
+  const jsonData = rows?.[0]?.final_json;
+  if (typeof jsonData === "string") return JSON.parse(jsonData);
+  if (jsonData && typeof jsonData === "object") return jsonData;
   throw new Error("Empty result from SQL");
 }

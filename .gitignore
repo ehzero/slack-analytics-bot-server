@@ -11,16 +11,11 @@ pnpm-debug.log*
 dist/
 build/
 
-# AWS SAM build artifacts
-.aws-sam/
-
 # Environment variables and secrets
 .env
 .env.*
 !.env.example
 *.env
-sam-env.json
-samconfig.toml
 
 # OS / Editor
 .DS_Store

@@ -1,34 +1,39 @@
-import { OpenAIService } from "../services/openaiService";
-import { SlackService } from "../services/slackService";
+import {
+  getOpenAIService,
+  getSlackService,
+} from "../services/singletonServices";
 import { fetchSummaryJsonFromDb } from "../services/dataService";
-import json from "../../test.json";
+import { REPORT_SYSTEM_PROMPT } from "../constants/prompts";
 
 // 데이터 분석 보고서를 생성하고 채널에 게시하는 핸들러
 export async function generateAnalyticsReport() {
   // 보고서에 사용할 데이터(JSON) 조회
-  const dataJson = await fetchSummaryJsonFromDb();
+  const jsonData = await fetchSummaryJsonFromDb();
 
-  // 보고서 생성용 시스템 프롬프트
-  const systemPrompt = process.env.OPENAI_REPORT_SYSTEM_PROMPT || "";
+  // 보고서 생성용 시스템 프롬프트는 상수에서 가져옴
 
-  const openai = new OpenAIService({
-    apiKey: process.env.OPENAI_API_KEY || "",
-    model: process.env.OPENAI_MODEL || "gpt-5-nano",
-  });
-
-  const slack = new SlackService(process.env.SLACK_BOT_TOKEN || "");
+  const openai = getOpenAIService();
+  const slack = getSlackService();
   const channel = process.env.REPORT_CHANNEL_ID || "";
 
   try {
     const report = await openai.summarizeJsonReport({
-      dataJson,
-      systemPrompt,
+      jsonData,
+      systemPrompt: REPORT_SYSTEM_PROMPT,
     });
 
     const blocks = JSON.parse(report) as any[];
 
     // Slack 채널로 보고서 전송
     await slack.postMessage({ channel, text: "", blocks });
+
+    // 원천 데이터를 JSON 파일로 업로드
+    await slack.uploadJson({
+      channel,
+      jsonData,
+      title: "주간 보고서 원천 데이터",
+      initial_comment: "📊 주간 분석 보고서의 원천 데이터입니다.",
+    });
   } catch (e: any) {
     await slack.postMessage({
       channel,

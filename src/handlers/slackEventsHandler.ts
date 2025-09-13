@@ -1,31 +1,18 @@
-import { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
+import { Request, Response } from "express";
 import { isValidSlackSignature } from "../services/slackVerifier";
-import { SlackService } from "../services/slackService";
-import { OpenAIService } from "../services/openaiService";
+import {
+  getSlackService,
+  getOpenAIService,
+} from "../services/singletonServices";
 import { executeSafeSelect } from "../services/dataService";
-import stringWidth from "string-width";
+import { QA_SYSTEM_PROMPT } from "../constants/prompts";
 
-// 표준 응답 헬퍼
-function ok(
-  body: unknown = { ok: true },
-  statusCode = 200
-): APIGatewayProxyResultV2 {
-  return {
-    statusCode,
-    headers: {
-      "Content-Type":
-        typeof body === "string" ? "text/plain" : "application/json",
-    },
-    body: typeof body === "string" ? body : JSON.stringify(body),
-  };
-}
-
-// 로그 유틸: 조기 반환 사유를 구조화해 출력 (CloudWatch에서 검색 용이)
+// 로그 유틸: 조기 반환 사유를 구조화해 출력
 function logReturnOk(reason: string, details?: Record<string, unknown>) {
   console.log(
     JSON.stringify({
       level: "info",
-      handler: "handleSlackMentionQnA",
+      handler: "handleSlackEvents",
       action: "return_ok",
       reason,
       details: details || {},
@@ -37,97 +24,35 @@ function logWarn(reason: string, details?: Record<string, unknown>) {
   console.warn(
     JSON.stringify({
       level: "warn",
-      handler: "handleSlackMentionQnA",
+      handler: "handleSlackEvents",
       reason,
       details: details || {},
     })
   );
 }
 
-function truncateForSlack(text: string, max = 10000): string {
-  if (text.length <= max) return text;
-  return text.slice(0, max - 20) + "\n... (truncated)";
-}
-
-function formatRowsAsTable(rows: any[], maxRows = 50): string {
-  const fence = String.fromCharCode(96).repeat(3);
-  if (!rows || rows.length === 0) {
-    return `${fence}\n(0 rows)\n${fence}`;
-  }
-  const limited = rows.slice(0, maxRows);
-  // 모든 컬럼 키 수집
-  const columns = Array.from(
-    new Set(limited.flatMap((row) => Object.keys(row || {})))
-  );
-  // 문자열 변환 및 폭 계산
-  const normalize = (v: unknown) => String(v ?? "").replace(/\r?\n/g, " ");
-  const stringRows = limited.map((row) =>
-    columns.map((col) => normalize((row as Record<string, unknown>)[col]))
-  );
-  const header = columns;
-  const all = [header, ...stringRows];
-
-  // 숫자열 판별: 해당 컬럼의 모든 non-empty 값이 숫자 형태면 숫자열로 간주
-  const isNumericColumn = columns.map((_, idx) =>
-    all.slice(1).every((r) => {
-      const v = r[idx]?.trim();
-      if (!v) return true; // 빈 값은 무시
-      return /^-?\d{1,3}(,\d{3})*(\.\d+)?$|^-?\d+(\.\d+)?$/.test(v);
-    })
-  );
-
-  const colWidths = columns.map((_, idx) =>
-    Math.max(...all.map((r) => stringWidth(r[idx] ?? "")))
-  );
-
-  const padLeft = (text: string, width: number) => {
-    const diff = width - stringWidth(text);
-    return diff > 0 ? " ".repeat(diff) + text : text;
-  };
-  const padRight = (text: string, width: number) => {
-    const diff = width - stringWidth(text);
-    return diff > 0 ? text + " ".repeat(diff) : text;
-  };
-
-  const sep = "+" + colWidths.map((w) => "-".repeat(w + 2)).join("+") + "+";
-  const line = (cells: string[]) =>
-    "| " +
-    cells
-      .map((c, i) =>
-        isNumericColumn[i]
-          ? padLeft(c, colWidths[i])
-          : padRight(c, colWidths[i])
-      )
-      .join(" | ") +
-    " |";
-
-  const headerLine =
-    "| " + header.map((c, i) => padRight(c, colWidths[i])).join(" | ") + " |";
-  const bodyLines = stringRows.map((r) => line(r));
-  const table = [sep, headerLine, sep, ...bodyLines, sep].join("\n");
-  return `${fence}\n${table}\n${fence}`;
-}
-
-// 멘션 기반 Q&A 처리 핸들러
-export async function handleSlackMentionQnA(
-  event: APIGatewayProxyEventV2
-): Promise<APIGatewayProxyResultV2> {
+// Express용 Slack Events 핸들러
+export async function handleSlackEvents(
+  req: Request,
+  _res: Response
+): Promise<{ statusCode: number; body: any }> {
   // 헤더 키를 소문자로 정규화
   const normalizedHeaders = Object.fromEntries(
-    Object.entries(event.headers || {}).map(([k, v]) => [k.toLowerCase(), v])
+    Object.entries(req.headers || {}).map(([k, v]) => [
+      k.toLowerCase(),
+      String(v),
+    ])
   );
 
   // 원문 바디 (서명 검증에 필요)
-  const rawRequestBody = event.isBase64Encoded
-    ? Buffer.from(event.body || "", "base64").toString("utf-8")
-    : event.body || "";
+  const rawRequestBody = req.body ? req.body.toString("utf-8") : "";
 
   // Slack API - Event Subscriptions 관련 URL 검증 챌린지 처리 (봇 설치 시 발생)
   try {
     const parsed = rawRequestBody ? JSON.parse(rawRequestBody) : {};
     if (parsed?.type === "url_verification" && parsed?.challenge) {
       logReturnOk("url_verification_challenge", { hasChallenge: true });
-      return ok({ challenge: parsed.challenge });
+      return { statusCode: 200, body: { challenge: parsed.challenge } };
     }
   } catch {
     // ignore
@@ -139,7 +64,7 @@ export async function handleSlackMentionQnA(
     logReturnOk("retry_slack_event", {
       retryNum: normalizedHeaders["x-slack-retry-num"],
     });
-    return ok();
+    return { statusCode: 200, body: { ok: true } };
   }
 
   // 서명 검증 (개발 환경에서는 SKIP 가능)
@@ -158,7 +83,7 @@ export async function handleSlackMentionQnA(
         normalizedHeaders["x-slack-request-timestamp"]
       ),
     });
-    return ok("unauthorized", 401);
+    return { statusCode: 401, body: "unauthorized" };
   }
 
   // 파싱된 바디
@@ -187,7 +112,7 @@ export async function handleSlackMentionQnA(
         subtype,
         hasUserId: Boolean(userId),
       });
-      return ok();
+      return { statusCode: 200, body: { ok: true } };
     }
 
     // 멘션이 포함된 메시지 또는 app_mention 이벤트만 처리
@@ -208,7 +133,7 @@ export async function handleSlackMentionQnA(
           isMentionEvent,
           isMessageWithMention,
         });
-        return ok();
+        return { statusCode: 200, body: { ok: true } };
       }
 
       if (mentionTag) {
@@ -216,36 +141,36 @@ export async function handleSlackMentionQnA(
       }
 
       // 재시도여도 멱등 처리만 하고 동기 처리 진행
-      const slack = new SlackService(process.env.SLACK_BOT_TOKEN || "");
-      const openai = new OpenAIService({
-        apiKey: process.env.OPENAI_API_KEY || "",
-        model: process.env.OPENAI_MODEL || "gpt-5-nano",
-      });
+      const slack = getSlackService();
+      const openai = getOpenAIService();
 
       try {
-        const sqlFromLLM = await openai.answerQuestionFromJson({
+        const sqlFromLLM = await openai.answerQuestion({
           question: messageText,
-          systemPrompt: process.env.OPENAI_QA_SYSTEM_PROMPT || "",
+          systemPrompt: QA_SYSTEM_PROMPT,
         });
-        const { rows, executedSql } = await executeSafeSelect(sqlFromLLM);
-        const header = `총 ${rows.length}행`;
+        const { jsonData, executedSql } = await executeSafeSelect(sqlFromLLM);
         const sqlFence = String.fromCharCode(96).repeat(3);
-        const tableBlock = formatRowsAsTable(rows, 100);
-        const headMessage = truncateForSlack(
-          `SQL 실행 결과\n\n${sqlFence}${executedSql}\n${sqlFence}\n${header}`
-        );
+
+        // 결과 요약 메시지 전송
+        const summaryMessage = `SQL\n\n${sqlFence}${executedSql}\n${sqlFence}`;
         await slack.replyInThread({
           channel: channelId,
           thread_ts: threadTs,
-          text: headMessage || "결과가 없습니다.",
+          text: summaryMessage,
         });
 
-        const tableMessage = truncateForSlack(tableBlock);
-        await slack.replyInThread({
-          channel: channelId,
-          thread_ts: threadTs,
-          text: tableMessage,
-        });
+        // JSON 파일 업로드
+        if (jsonData) {
+          await slack.uploadJson({
+            channel: channelId,
+            jsonData,
+            title: `쿼리 결과`,
+            initial_comment: `📊 쿼리 실행 결과를 JSON 파일로 첨부합니다.`,
+            thread_ts: threadTs,
+          });
+        }
+
         processed = true;
       } catch (e: any) {
         await slack.replyInThread({
@@ -265,5 +190,5 @@ export async function handleSlackMentionQnA(
       hasEventCallback: parsedBody?.type === "event_callback",
     });
   }
-  return ok();
+  return { statusCode: 200, body: { ok: true } };
 }

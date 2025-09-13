@@ -11,7 +11,7 @@ export class OpenAIService {
     this.model = params.model ?? "gpt-5-nano";
   }
 
-  async answerQuestionFromJson(params: {
+  async answerQuestion(params: {
     question: string; // 사용자의 질문
     systemPrompt: string; // 시스템 지시 프롬프트
     maxTokens?: number; // 응답 토큰 제한
@@ -34,16 +34,16 @@ export class OpenAIService {
   }
 
   async summarizeJsonReport(params: {
-    dataJson: unknown; // 보고서용 도메인 JSON 데이터
+    jsonData: unknown; // 보고서용 도메인 JSON 데이터
     systemPrompt: string; // 요약 지시 프롬프트
     maxTokens?: number; // 응답 토큰 제한
   }): Promise<string> {
-    const { dataJson, systemPrompt, maxTokens } = params;
+    const { jsonData, systemPrompt, maxTokens } = params;
     const messages: OpenAI.ChatCompletionMessageParam[] = [
       { role: "system", content: systemPrompt },
       {
         role: "user",
-        content: `JSON:\n${JSON.stringify(dataJson)}`,
+        content: `JSON:\n${JSON.stringify(jsonData)}`,
       },
     ];
 
