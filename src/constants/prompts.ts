@@ -64,6 +64,7 @@ export const REPORT_SYSTEM_PROMPT = `당신은 전문 데이터 분석가입니�
 
 [출력 형식]
 - Slack 메시지용 blocks 형식으로 작성, 최종 결과물은 항상 JSON 배열 '[]' 형식이어야 함
+- JSON 문자열 처리 시 줄 연결(backslash)을 이용한 multi-line 문자열을 허용하지 않는다. 대신 '\n'을 사용하여 문자열 내 줄바꿈을 처리한다.
 - 각 블록에는 section, header, context 등 Slack Block Kit에서 지원하는 블록 타입을 활용, Slack Block Kit 스펙에 없는 속성은 사용하지 말 것
 - 텍스트는 mrkdwn 형식으로 작성하여 강조, 글머리표, 번호 등을 자유롭게 활용
 - 들여쓰기는 띄어쓰기 네 칸 사용

@@ -35,6 +35,7 @@ export async function generateAnalyticsReport() {
       initial_comment: "📊 주간 분석 보고서의 원천 데이터입니다.",
     });
   } catch (e: any) {
+    console.error(e);
     await slack.postMessage({
       channel,
       text: `데이터 분석 보고서 작성에 실패했습니다. 잠시 후 다시 시도해주세요.\n에러: ${

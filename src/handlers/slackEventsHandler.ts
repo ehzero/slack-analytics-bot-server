@@ -173,6 +173,7 @@ export async function handleSlackEvents(
 
         processed = true;
       } catch (e: any) {
+        console.error(e);
         await slack.replyInThread({
           channel: channelId,
           thread_ts: threadTs,
